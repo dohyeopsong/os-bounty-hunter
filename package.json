@@ -1,0 +1,18 @@
+{
+  "name": "os-bounty-hunter",
+  "version": "0.1.0",
+  "description": "GitHub good first issue 를 자동 수집 → 로컬 격리 clone → 헤드리스 Claude 로 버그 수정 → PR 초안 생성하는 CLI 툴",
+  "type": "module",
+  "bin": {
+    "os-bounty-hunter": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
