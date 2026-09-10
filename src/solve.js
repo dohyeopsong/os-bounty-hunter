@@ -3,14 +3,16 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { config } from './config.js';
 
-// 허용 도구 화이트리스트. git push / gh 는 목록에 없어 헤드리스 모드에서
-// 프로프트 없이 자동 거부된다.
+// 허용 도구 화이트리스트. 분류기/Manual 프롬프트를 거치지 않고 바로 실행된다.
+// node 는 테스트 스크립트 실행에 필요하므로 포함 (없으면 3.7절처럼 거부됨).
+// push/PR 차단은 아래 DISALLOWED_TOOLS 가 하드 블록한다 (allowlist 누락에만 의존 X).
 const ALLOWED_TOOLS = [
   'Read',
   'Glob',
   'Grep',
   'Edit',
   'Write',
+  'Bash(node *)',
   'Bash(npm test)',
   'Bash(npm run *)',
   'Bash(npx *)',
@@ -21,6 +23,16 @@ const ALLOWED_TOOLS = [
   'Bash(ls *)',
   'Bash(cat *)',
   'Bash(find *)',
+].join(' ');
+
+// 헤드리스 solver 하드 차단 목록. allowlist 와 무관하게 무조건 거부된다.
+// claude -p 는 cwd 가 타겟 레포라 .claude/settings.json 을 로드하지 않으므로,
+// push/PR 방어는 이 CLI 플래그로 직접 주입해야 한다.
+const DISALLOWED_TOOLS = [
+  'Bash(git push:*)',
+  'Bash(git remote:*)',
+  'Bash(gh pr:*)',
+  'Bash(gh repo:*)',
 ].join(' ');
 
 /**
@@ -105,6 +117,7 @@ export async function solveIssue(repoDir, issue, language) {
     '--output-format', 'json',
     '--add-dir', repoDir,
     '--allowed-tools', ALLOWED_TOOLS,
+    '--disallowed-tools', DISALLOWED_TOOLS,
     '--append-system-prompt', guardrails,
   ];
 
