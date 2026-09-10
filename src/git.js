@@ -193,16 +193,22 @@ export function installDeps(repoDir) {
  * installDeps() 등이 만들어낸 이슈와 무관한 노이즈 파일.
  * 이 파일들은 스테이징/커밋/ diff 에서 모두 제외된다.
  */
-const NOISE_PATHS = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
+const NOISE_PATHS = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'PR_DRAFT.md'];
 
 /**
  * 의도한 변경사항을 스테이징한다.
  * `git add -A` 는 untracked 신규 파일(Solve 가 Write 한 파일)까지 잡기 위해
  * 쓰되, pathspec exclude 로 노이즈 파일은 제외한다.
  *
+ * 노이즈: lockfile(installDeps 부산물) + PR_DRAFT.md(이 초안 자체).
+ * PR_DRAFT.md 는 generateDraft() 가 커밋 직전에 디스크에 쓰므로, 제외하지
+ * 않으면 fix 커밋에 초안 파일이 섞여 PR diff 에 노이즈로 보인다.
+ *
  * 스테이징을 getDiff() 보다 먼저 수행하는 게 핵심이다 — 그래야
  * `git diff --cached` 가 신규 파일까지 diff 에 포함한다.
  * (untracked 상태의 새 파일은 일반 `git diff` 에 보이지 않는다.)
+ *
+ * 멱등: commitChanges() 도 내부에서 호출하지만, 중복 실행해 안전하다.
  */
 export function stageChanges(repoDir) {
   const exclude = NOISE_PATHS.map((p) => `:!${p}`);

@@ -38,6 +38,7 @@ function parseSections(text) {
 export async function generateDraft(repoDir, issue, solveResult, language) {
   // 1) 의도한 변경사항을 먼저 스테이징 (노이즈 제외).
   //    이렇게 해야 아래 getDiff() 가 --cached 기반으로 신규 파일까지 잡는다.
+  //    (commitChanges() 도 내부에서 다시 stageChanges 하지만 멱등이라 안전.)
   stageChanges(repoDir);
   const { stat, full } = getDiff(repoDir);
   const sections = parseSections(solveResult.result);
