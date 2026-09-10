@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "permissions": {
     "allow": [
-      "Bash(node:*)",
-      "Bash(git:*)",
-      "Bash(npm:*)",
-      "Bash(gh:*)"
+      "Bash(node *)",
+      "Bash(git *)",
+      "Bash(npm *)",
+      "Bash(gh *)"
     ],
     "deny": [
       "Bash(git push:*)",
