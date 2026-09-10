@@ -59,45 +59,51 @@ const FALLBACK_GUARDRAILS = `
 `;
 
 /**
- * Solve 프롬프트 빌더.
+ * 프롬프트 템플릿 캐시. 첫 호출 시 src/prompts/solve.txt 를 읽어 둔다.
+ * 템플릿 안의 {{placeholder}} 를 변수로 치환한다. 프롬프트 텍스트를
+ * 로직(js)과 분리해 언어별/도메인별 확장을 쉽게 만든다.
  */
-function buildSolvePrompt(issue, language) {
-  return `당신은 오픈소스 버그 헌터입니다. 아래 GitHub 이슈를 해결하는 코드 수정을 수행하세요.
+let _solveTemplate = null;
+async function loadSolveTemplate() {
+  if (_solveTemplate) return _solveTemplate;
+  const tplPath = join(config.projectRoot, 'src', 'prompts', 'solve.txt');
+  try {
+    _solveTemplate = await readFile(tplPath, 'utf8');
+  } catch {
+    throw new Error(`Solve 프롬프트 템플릿을 찾을 수 없음: ${tplPath}`);
+  }
+  return _solveTemplate;
+}
 
-# 이슈 정보
-- 레포: ${issue.owner}/${issue.repo} (#${issue.number})
-- 언어: ${language}
-- URL: ${issue.htmlUrl}
+/**
+ * 신뢰할 수 없는 사용자 입력(이슈 본문/댓글)에서 프롬프트 펜스 태그를 제거한다.
+ * 공격자가 이슈 본문에 </issue_body> 를 넣어 XML 울타리를 탈출한 뒤
+ * 새 지시를 주입하는(prompt injection) 것을 막는다.
+ */
+function sanitizeUserInput(text) {
+  if (!text) return '';
+  return String(text)
+    // 프롬프트 펜스 태그 탈출 방지 (XML injection)
+    .replace(/<\/?issue_body>/gi, '[filtered]')
+    .replace(/<\/?issue_comments>/gi, '[filtered]')
+    // 템플릿 플레이스홀더 악용 방지 ({{issue_body}} 등을 본문에 넣어 치환 유도 차단)
+    .replace(/\{\{[^}]+\}\}/g, '[filtered]');
+}
 
-# 이슈 본문
-${issue.body}
-
-# 이슈 댓글 (수정 방향이 명시된 경우가 많음)
-${issue.comments}
-
-# 수행 지침
-1. 현재 디렉터리의 코드 구조를 분석한다 (Read/Glob/Grep 사용).
-2. 이슈 본문과 댓글의 요구사항을 파악한다.
-3. 최소한의 변경으로 로직을 수정한다 (Edit/Write 사용).
-   - 포맷팅(띄어쓰기/줄바꿈)만 변경하지 마라 — 반드시 로직 수정.
-   - 관련 없는 파일은 수정하지 마라.
-4. package.json 에 test 스크립트가 있으면 "npm test" 를 실행해 결과를 확인한다.
-   - 실패하면 원인 분석, 가능하면 수정.
-5. 작업은 반드시 현재 디렉터리 내부에서만. git push / 원격 조작 / PR 생성 절대 금지.
-
-# 최종 응답 형식 (반드시 아래 마크다운 헤더 준수, 다른 헤더 추가 금지)
-## Summary
-(무엇을 왜 수정했는지 논리적 근거)
-
-## Changes
-(기존 코드 vs 변경 코드의 핵심 차이점)
-
-## Test Results
-(npm test 결과. 테스트 없으면 "N/A", 실패 시 원인)
-
-## PR Description
-(GitHub PR 제출용 영문 본문. 복사해 바로 쓸 수 있게)
-`;
+/**
+ * Solve 프롬프트 빌더 — 템플릿 파일을 로드해 변수를 치환한다.
+ * 이슈 본문/댓글은 sanitizeUserInput 로 정제한 뒤 주입한다.
+ */
+async function buildSolvePrompt(issue, language) {
+  const tpl = await loadSolveTemplate();
+  return tpl
+    .replace(/\{\{owner\}\}/g, issue.owner || '')
+    .replace(/\{\{repo\}\}/g, issue.repo || '')
+    .replace(/\{\{number\}\}/g, issue.number || '')
+    .replace(/\{\{language\}\}/g, language || '')
+    .replace(/\{\{htmlUrl\}\}/g, issue.htmlUrl || '')
+    .replace(/\{\{issue_body\}\}/g, sanitizeUserInput(issue.body))
+    .replace(/\{\{issue_comments\}\}/g, sanitizeUserInput(issue.comments));
 }
 
 /**
@@ -110,7 +116,7 @@ ${issue.comments}
  */
 export async function solveIssue(repoDir, issue, language) {
   const guardrails = await guardrailsPrompt();
-  const prompt = buildSolvePrompt(issue, language);
+  const prompt = await buildSolvePrompt(issue, language);
 
   const args = [
     '-p', prompt,
@@ -121,18 +127,24 @@ export async function solveIssue(repoDir, issue, language) {
     '--append-system-prompt', guardrails,
   ];
 
-  console.log(`  🤖  헤드리스 Claude 호출: ${config.claudeBin}`);
+  const timeoutMs = config.solveTimeoutMs;
+  console.log(`  🤖  헤드리스 Claude 호출: ${config.claudeBin} (타임아웃 ${Math.round(timeoutMs / 1000)}s)`);
 
   return new Promise((resolve) => {
     const child = execFile(config.claudeBin, args, {
       cwd: repoDir,
       encoding: 'utf8',
       maxBuffer: 50 * 1024 * 1024,
+      // 운영체제 단 하드 타임아웃 — claude-glm 이 네트워크 무한 대기 등으로
+      // 좀비 프로세스가 되는 것을 막는다. 시간 초과 시 SIGTERM 으로 프로세스 종료.
+      timeout: timeoutMs,
+      killSignal: 'SIGTERM',
       env: { ...process.env, CLAUDE_CODE_SIMPLE: '1' },
     });
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
 
@@ -143,12 +155,30 @@ export async function solveIssue(repoDir, issue, language) {
           error: `claude-glm 래퍼를 찾을 수 없음: ${config.claudeBin}\nsetup-claude-glm.sh 를 먼저 실행하세요.`,
           result: '',
         });
+      } else if (err.killed) {
+        // timeout 옵션이 프로세스를 죽인 경우 (TimeoutError)
+        timedOut = true;
+        resolve({
+          ok: false,
+          error: `claude-glm 타임아웃 (${Math.round(timeoutMs / 1000)}s 초과). 좀비 프로세스 종료.\n${stderr.slice(0, 1000)}`,
+          result: '',
+        });
       } else {
         resolve({ ok: false, error: String(err), result: '' });
       }
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
+      if (timedOut) return; // 이미 error 핸들러에서 resolve 됨
+      // timeout 에 의해 SIGTERM 으로 종료된 경우 (close 만 발생하는 경로 대비)
+      if (signal === 'SIGTERM' && code === null) {
+        resolve({
+          ok: false,
+          error: `claude-glm 타임아웃 (${Math.round(timeoutMs / 1000)}s 초과). 프로세스 강제 종료됨.`,
+          result: stdout ? safeExtractResult(stdout) : '',
+        });
+        return;
+      }
       if (code !== 0 && !stdout) {
         resolve({
           ok: false,
@@ -167,4 +197,16 @@ export async function solveIssue(repoDir, issue, language) {
       }
     });
   });
+}
+
+/**
+ * stdout 에서 부분적으로 들어온 JSON 의 result 필드만 안전 추출 (타임아웃 시).
+ */
+function safeExtractResult(stdout) {
+  try {
+    const parsed = JSON.parse(stdout);
+    return parsed.result || '';
+  } catch {
+    return '';
+  }
 }

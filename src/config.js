@@ -32,6 +32,9 @@ export const config = {
   perPage: 20,
   githubToken: process.env.GITHUB_TOKEN || '',
   claudeBin: resolveClaudeBin(),
+  // 헤드리스 solver 실행 하드 타임아웃 (ms). 좀비 프로세스/네트워크 무한 대기 방지.
+  // env SOLVE_TIMEOUT_MS 로 덮어쓰기 가능. 기본 10분.
+  solveTimeoutMs: Number(process.env.SOLVE_TIMEOUT_MS) || 10 * 60 * 1000,
 };
 
 /**
