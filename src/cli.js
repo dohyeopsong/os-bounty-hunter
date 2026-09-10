@@ -9,11 +9,13 @@ import { solveIssue } from './solve.js';
 import { generateDraft } from './draft.js';
 
 function parseArgs(argv) {
-  const args = { lang: config.defaultLanguage };
+  const args = { lang: config.defaultLanguage, fresh: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if ((a === '--lang' || a === '-l') && argv[i + 1]) {
       args.lang = argv[++i];
+    } else if (a === '--fresh') {
+      args.fresh = true;
     } else if (a === '--help' || a === '-h') {
       args.help = true;
     }
@@ -30,6 +32,7 @@ os-bounty-hunter — GitHub good first issue 자동 해결 CLI
 
 옵션:
   --lang, -l    검색할 언어 (기본: ${config.defaultLanguage})
+  --fresh       선택한 이슈의 기존 workspace 를 지우고 다시 clone
   --help, -h    도움말
 
 환경변수:
@@ -82,7 +85,7 @@ async function main() {
 
   // --- 2. Clone ---
   console.log('\n[2/4] Clone — 로컬 격리 workspace');
-  const repoDir = cloneRepo(selected);
+  const repoDir = await cloneRepo(selected, { fresh: args.fresh });
   installDeps(repoDir);
 
   // --- 3. Solve ---
